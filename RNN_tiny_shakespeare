@@ -1,0 +1,137 @@
+# Author: Bobby Bose
+# Assignment 4: Text Generation with RNNs
+
+# Imports
+import tensorflow as tf
+import matplotlib.pyplot as plt
+import numpy as np
+import os
+
+
+# Main function of the program and RNN
+def main():
+    # Reading in training data
+    tiny_shakespeare = open('tiny-shakespeare.txt', 'r').read()
+
+    # List of characters in training data
+    vocab = sorted(set(tiny_shakespeare))
+
+    # Map characters to index
+    charToInt = {character: index for index, character in enumerate(vocab)}
+
+    # Map index to characters
+    intToChar = np.array(vocab)
+
+    # Converting training data to indices
+    converted_input = np.array([charToInt[character] for character in tiny_shakespeare])
+
+    # Splitting input into examples
+    example_length = 100
+    num_examples = len(tiny_shakespeare) // (example_length + 1)
+    dataset = tf.data.Dataset.from_tensor_slices(converted_input)
+    examples = dataset.batch(example_length + 1, drop_remainder=True)
+
+    # Creating input and output sequences
+    dataset = examples.map(create_input_output)
+
+    # Splitting training dataset into batches
+    dataset = dataset.shuffle(10000).batch(64, drop_remainder=True)
+
+    # Length of the vocabulary in chars.
+    vocab_size = len(vocab)
+
+    # Creating RNN model
+    model = create_RNN_model(vocab_size, 256, 64, 512)
+    print(model.summary())
+
+    # Initializing an optimizer
+    optimizer = tf.keras.optimizers.Adam()
+    
+    # Compiling the model
+    model.compile(optimizer=optimizer, loss=loss)
+
+    # Setting up checkpoints for RNN training
+    checkpoint_dir = 'checkpoints'
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    checkpoints = tf.keras.callbacks.ModelCheckpoint(filepath=os.path.join(checkpoint_dir, 'checkpoint: {epoch}'), save_weights_only=True)
+
+    # Training the RNN model
+    training = model.fit(x=dataset, epochs=20, callbacks=[checkpoints])
+
+    # Loading latest checkpoint
+    tf.train.latest_checkpoint(checkpoint_dir)
+
+    # Creating new model for predicting
+    model = create_RNN_model(vocab_size, 256, 1, 512)
+
+    # Updating new model with latest checkpoint
+    model.load_weights(tf.train.latest_checkpoint(checkpoint_dir))
+
+    # Building new model
+    model.build(tf.TensorShape([1, None]))
+
+    # Obtaining a prediction with the RNN
+    print(predict(model, "Q U E E N :", charToInt, intToChar))
+
+
+# Description: Creates an input and output sequence for an example
+# Arguments: Example being split
+# Returns: Input and output sequence
+def create_input_output(example):
+  return example[:-1], example[1:]
+
+
+# Description: Size of dataset vocabulary, embedding size, size of batches, RNN layers
+# Arguments: Creates an LSTM RNN model
+# Returns: RNN model
+def create_RNN_model(vocab_size, embedding_size, batch_size, layers):
+    # Initializing model
+    model = tf.keras.models.Sequential()
+
+    # Adding embedding layer for the RNN
+    model.add(tf.keras.layers.Embedding(vocab_size, embedding_size, batch_input_shape=[batch_size, None]))
+
+    # Adding LSTM layer
+    model.add(tf.keras.layers.LSTM(layers, recurrent_initializer=tf.keras.initializers.GlorotNormal(), return_sequences=True, stateful=True))
+
+    # Adding dense layer
+    model.add(tf.keras.layers.Dense(vocab_size))
+
+    return model
+
+
+# Description: Calculates loss
+# Arguments: True y value, and predicted y value
+# Returns: Loss
+def loss(true_value, pred_value):
+    return tf.keras.losses.sparse_categorical_crossentropy(y_true=true_value, y_pred=pred_value, from_logits=True)
+
+
+# Description: RNN model, starting input, char to int converter, int to char converter
+# Arguments: Makes a prediction for text following given input, using the RNN model
+# Returns: Prediction results
+def predict(model, given_input, charToInt, intToChar):
+    # Converting input to indices
+    input = tf.expand_dims([charToInt[character] for character in  given_input], 0)
+
+    # Full output
+    result = []
+    
+    # Resetting RNN states
+    model.reset_states()
+
+    #for char_index in range(num_generate):
+    for i in range(200):
+        # Calculating prediction based on input
+        prediction = tf.random.categorical(tf.squeeze(model(input), 0), num_samples=1)[-1,0].numpy()
+
+        # Setting the new input with the prediction
+        input = tf.expand_dims([prediction], 0)
+
+        # Adding prediction to full result
+        result.append(intToChar[prediction])
+
+    return given_input + ''.join(result)
+
+
+main()
